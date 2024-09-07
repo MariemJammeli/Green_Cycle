@@ -1,0 +1,1160 @@
+(function () {
+
+
+  // Debug stuff
+  let debug = false;
+  if (location.href.includes("tqf=yes")) {
+    debug = true;
+  }
+
+  // if (!debug) {
+  //   return
+  // }
+
+  const logger = (...arguments) => {
+    if (!debug) {
+      return; // no log if no debug
+    }
+    console.log("[qtag]", ...arguments);
+  };
+
+  let v = 12;
+  logger("version:", v);
+
+  try {
+
+    // Cart token state manager
+
+    const stateManager = {
+      getCartToken: () => localStorage.getItem("qfy_carttoken"),
+      setCartToken: (v) => localStorage.setItem("qfy_carttoken", v),
+    };
+
+    // core functions for UID and tag beacon
+
+    const getUid = () => {
+      // fetch or create a unique id
+      var uid = localStorage.getItem("qtf_uid");
+      if (null == uid) {
+        uid = "" + Date.now() + "." + Math.floor(Math.random() * 10000);
+        localStorage.setItem("qtf_uid", uid);
+      }
+      return uid;
+    };
+
+    const qfyTag = (queryParams) => {
+      logger("qfyTag", queryParams);
+      var url =
+        "https://europe-west1-sonorous-dragon-276210.cloudfunctions.net/quantag?";
+
+      if (!queryParams.hasOwnProperty("qtv")) {
+        queryParams.qtv = v;
+      }
+      if (!queryParams.hasOwnProperty("hostname")) {
+        queryParams.hostname = window.location.hostname;
+      }
+      if (!queryParams.hasOwnProperty("path")) {
+        queryParams.path = window.location.pathname;
+      }
+      if (!queryParams.hasOwnProperty("referrer")) {
+        queryParams.referrer = document.referrer;
+      }
+      if (!queryParams.hasOwnProperty("qfy_cookie")) {
+        queryParams.qfy_cookie = encodeURI(document.cookie);
+      }
+
+      var qfyUid2 = localStorage.getItem("qtf_uid2");
+      if (!queryParams.hasOwnProperty("qfy_uid_2") && qfyUid2 != null) {
+        queryParams.qfy_uid_2 = qfyUid2;
+      }
+      var qfyUid2Reset = localStorage.getItem("qtf_uid2_reset");
+      if (
+        !queryParams.hasOwnProperty("qfy_uid_2_reset") &&
+        qfyUid2Reset != null
+      ) {
+        queryParams.qfy_uid_2_reset = qfyUid2Reset;
+      }
+
+      queryParams.uid = getUid();
+
+      var serializedQueryParams = [];
+      for (var paramKey in queryParams) {
+        if (queryParams.hasOwnProperty(paramKey)) {
+          serializedQueryParams.push(
+            encodeURIComponent(paramKey) +
+              "=" +
+              encodeURIComponent(queryParams[paramKey])
+          );
+        }
+      }
+      url = url + serializedQueryParams.join("&");
+      var xhr = new XMLHttpRequest();
+      xhr.open("GET", url);
+      xhr.send();
+    };
+
+    const sha256 = async (message) => {
+      // encode as UTF-8
+      const msgBuffer = new TextEncoder().encode(message);
+
+      // hash the message
+      const hashBuffer = await crypto.subtle.digest("SHA-256", msgBuffer);
+
+      // convert ArrayBuffer to Array
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+
+      // convert bytes to hex string
+      const hashHex = hashArray
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+      return hashHex;
+    };
+
+    const docReady = (fn) => {
+      // see if DOM is already available
+      if (
+        document.readyState === "complete" ||
+        document.readyState === "interactive"
+      ) {
+        // call on next available tick
+        setTimeout(fn, 1);
+      } else {
+        document.addEventListener("DOMContentLoaded", fn);
+      }
+    };
+    
+    /**
+     * Form management
+     */
+
+    // we want to monitor on inputs change (paste included)
+
+    /** @type HTMLFormElement[] */
+    const monitoredInputs = [];
+
+    /** @param {HTMLFormElement} input */
+    const monitorInput = (input) => {
+      logger("monitorInput", input);
+      if (monitoredInputs.length > 100) {
+        logger("too many monitored inputs");
+        return;
+      }
+      monitoredInputs.push(input);
+      input.addEventListener("change", onInputChange);
+    };
+    /**
+     * Handles the change event for the input element.
+     * @param {Event} e - The change event object.
+     */
+    const onInputChange = async (e) => {
+        logger("input changed", e.target.value);
+        email = e.target.value;
+        if(validateMail(email)){
+          logger("input changed and is an email", e.target.value);
+          //Hash
+          let hashed_email = await sha256(email);
+          // Construct request
+          var _nextParams = {
+            hash_email: hashed_email,
+            hash_email_source: "form",
+          };
+
+          qfyTag(_nextParams);
+            
+          //test 
+          logger("hashed email",hashed_email);
+      }
+    };
+    // Start by listening on HTML changes
+    // Callback function to execute when mutations are observed
+    /** @type MutationCallback */
+    const onHtmlDomMutation = (mutationList) => {
+      logger("onHtmlDomMutation triggered")
+      for (const mutation of mutationList) {
+        if (mutation.type === "childList") {
+          
+          const newInputs = [];
+
+          mutation.addedNodes.forEach((node) => {
+            logger("onHtmlDomMutation. new node:", node.constructor.name, node.tagName, node);
+            if (node instanceof HTMLElement) {
+              // logger("onHtmlDomMutation. instanceof HTMLElement");
+              if (node.tagName === "INPUT") {
+                if (node.type === "email" || node.type === "text") {
+                  logger("onHtmlDomMutation. inputToMonitor:", input.type, input.type === "email" || input.type === "text", input);
+                  newInputs.push(node);
+                }
+              } else {
+                const a = node.querySelectorAll("input")
+                // logger("onHtmlDomMutation. children:", a.length, a);
+                a.forEach((input) => {
+                  // logger("onHtmlDomMutation. input:", input.type, input.type === "email" || input.type === "text", input);
+                  if (input.type === "email" || input.type === "text") {
+                    logger("onHtmlDomMutation. inputToMonitor:", input.type, input.type === "email" || input.type === "text", input);
+                    newInputs.push(input);
+                  }
+                });
+              }
+            } else {
+              logger("onHtmlDomMutation. not HTMLElement", node.constructor.name, node);
+              // const a = node.querySelectorAll("input")
+              // logger("onHtmlDomMutation. children:", a);
+              // a.forEach((input) => {
+              //   if (input.type === "email" || input.type === "text") {
+              //     newInputs.push(input);
+              //   }
+              // });
+            }
+          })
+
+          logger("onHtmlDomMutation. monitoredInputs:", monitoredInputs.length, monitoredInputs);
+          logger("onHtmlDomMutation. newInputs:", newInputs.length, newInputs);
+          newInputs.forEach((input) => {
+            logger("onHtmlDomMutation. newInput:", input.constructor.name, input.tagName, input);
+
+            if (monitoredInputs.length === 0) {
+              logger("onHtmlDomMutation. monitor cause length 0:", input.constructor.name, input.tagName, input);
+              monitorInput(input);
+            }
+            monitoredInputs.forEach((monitoredInput) => {
+              // if one of the monitored inputs is the same as the new input, we don't want to monitor it again
+              if (monitoredInput === input) {
+                return;
+              }
+            });
+            logger("onHtmlDomMutation. monitor cause not monitored yet:", input.constructor.name, input.tagName, input);
+            monitorInput(input);
+          });
+
+          // handleIframes();
+
+        }
+      }
+    };
+
+    const inputObserver = new MutationObserver(onHtmlDomMutation);
+    const inputObserverConfig = { attributes: true, childList: true, subtree: true };
+    const inputObserverTarget = document.body;
+    inputObserver.observe(inputObserverTarget, inputObserverConfig);
+
+    // Then import all existing input nodes
+    document.querySelectorAll("input").forEach((input) => {
+      if (input.type === "email" || input.type === "text") {
+        logger("onHtmlDomMutation. monitor cause start:", input.constructor.name, input.tagName, input);
+        monitorInput(input);
+      }
+    });
+    
+    //Function needed to not reuse an already tracked form when the DOM updates // returns the new ones from an array (used to compare new state vs prev )
+    const getUniqueElements = (arr1, arr2)=> {
+      //making sure that we are dealing with arrays not Nodelists
+      arr1 = Array.from(arr1)
+      arr2 = Array.from(arr2)
+
+      // Create sets for both arrays
+      const set1 = new Set(arr1);
+      const set2 = new Set(arr2);
+
+      // Find unique elements in both arrays
+      const uniqueToArr1 = arr1.filter((item) => !set2.has(item));
+      const uniqueToArr2 = arr2.filter((item) => !set1.has(item));
+      return [...uniqueToArr1, ...uniqueToArr2];
+    }
+    //Function that returns 
+    const getUpdatedElements= (arr1,arr2)=>{
+      const set = new Set([...arr1,...arr2]);
+      return Array.from(set);
+    }
+    const validateMail = (email) => {
+        //Check email is a correct formatted one
+        //Regex
+        const regex =
+          /(?:[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*|"(?:[\x01-\x08\x0b\x0c\x0e-\x1f\x21\x23-\x5b\x5d-\x7f]|\\[\x01-\x09\x0b\x0c\x0e-\x7f])*")@(?:(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}|(?:\[(?:(?:(2(5[0-5]|[0-4][0-9])|1[0-9][0-9]|[1-9]?[0-9]))\.){3}(?:(2(5[0-5]|[0-4][0-9])|1[0-9][0-9]|[1-9]?[0-9])|[a-z0-9-]*[a-z0-9]:(?:[\x01-\x08\x0b\x0c\x0e-\x1f\x21-\x5a\x53-\x7f]|\\[\x01-\x09\x0b\x0c\x0e-\x7f])+)\]))/;
+  
+        return regex.test(email);
+    };
+  
+    // global variable that stores all the forms coming from iframes
+    var iframesForms = [];
+    // global variable that store all the forms according to the DOM updates
+    var forms = document.querySelectorAll("form");
+  
+    //Function that gets the forms from iframes if possible , otherwise it is impossible because of cross-origin policies
+    const handleIframes = () => {
+      const iframes = document.querySelectorAll("iframe");
+      for (let frame of iframes) {
+        frame.sandbox = "allow-same-origin allow-scripts";
+          if (frame.contentDocument) {
+            const forms = frame.contentDocument.querySelectorAll("form");
+            iframesForms= getUpdatedElements(iframesForms,forms)
+          }
+      }
+    };
+    //function that takes a form as an argument and sends the email once it is a valid one 
+    const retrieveMailFromNoSubmitForm =  (form)=>{
+        
+        const emailInput = form.querySelector("input[type='email']")
+        let email = ""
+        if(emailInput){
+        emailInput.addEventListener("change",async(e)=>{ 
+            logger("email changed", e.target.value);
+            email = e.target.value;
+            if(validateMail(email)){
+                //Hash
+            let hashed_email = await sha256(email);
+            // Construct request
+            var _nextParams = {
+              hash_email: hashed_email,
+              hash_email_source: form.id || "form",
+            };
+    
+            qfyTag(_nextParams);
+              
+            // //test 
+            // console.log("hashed email",hashed_email);
+          }
+        })}
+        
+  
+      }
+        //enable functionality for inline forms 
+    for(let fo of forms){
+      logger("forms - initial loop - ", fo.id, fo.className, fo.data);
+      retrieveMailFromNoSubmitForm(fo)
+    }
+    
+    
+    /**
+     * // END Form management
+     */
+
+    const monitorNuxtCheckout = () => {
+      if ("undefined" === typeof $nuxt) {
+        return;
+      }
+      if ("undefined" === typeof $nuxt.$store) {
+        logger("no nuxt store");
+        return;
+      }
+      if ("undefined" === typeof $nuxt.$store.subscribe) {
+        logger("no nuxt store subscribe");
+        return;
+      }
+
+      const unsubscribe = $nuxt.$store.subscribe((mutation, state) => {
+        if (mutation.type == "checkout/SET_CHECKOUT") {
+          fakeCheckoutVisit(mutation.payload.id, mutation.payload.webUrl, "");
+        }
+      });
+    };
+
+    const fakeCheckoutVisit = (checkoutId, checkoutUrl, optionalPayload) => {
+      const storageKey = "qfy_" + checkoutId;
+      if (sessionStorage.getItem(storageKey)) {
+        logger("already sent: ", checkoutUrl);
+        return;
+      }
+      const url = new URL(checkoutUrl);
+
+      var _nextParams = {
+        path: url.pathname,
+        referrer: window.location.hostname,
+      };
+
+      qfyTag(_nextParams);
+
+      sessionStorage.setItem(storageKey, "true");
+    };
+
+    const monitorAxeptio = () => {
+      window._axcb = window._axcb || [];
+      window._axcb.push(function (sdk) {
+        sdk.on("cookies:complete", function (choices) {
+          qfyTag({
+            referrer: window.location.hostname,
+            qfy_cmp: "axeptio",
+            qfy_consent: encodeURI(JSON.stringify(choices)),
+          });
+        });
+      });
+    };
+
+    const sendGtmEvent = () => {
+      window.dataLayer = window.dataLayer || [];
+      dataLayer.push({
+        event: "qfy_setup",
+        qfy_uid: getUid(),
+      });
+    };
+
+    // callback takes an object {oldValue, newValue} as first parameter and returns a bool indicating to stop the polling
+    const listenCookieChange = (callback, interval = 1000) => {
+      let lastCookie = document.cookie;
+      let checkCookieIntervalId = setInterval(() => {
+        logger("polling cookie...");
+        let cookie = document.cookie;
+        if (cookie !== lastCookie) {
+          try {
+            let stop = callback({ oldValue: lastCookie, newValue: cookie });
+            if (stop) {
+              logger("stop");
+              clearInterval(checkCookieIntervalId);
+            }
+          } finally {
+            lastCookie = cookie;
+          }
+        }
+      }, interval);
+    };
+
+    const monitorCartToken = () => {
+      logger("monitorCartToken start");
+      let cartFromCookie = (c) => {
+        const i = c.indexOf("; cart=");
+        if (i > -1) {
+          const end = c.indexOf(";", i + 7); // 7 chars for "; cart="
+          return c.substring(i + 7, end);
+        }
+        return "";
+      };
+
+      // prevents duplicated sendings
+      let sendCartEvent = (cartToken) => {
+        logger("monitorCartToken sendCartEvent", cartToken);
+
+        const storedCartToken = stateManager.getCartToken();
+        if (storedCartToken == cartToken) {
+          return; // dont send duplicate
+        }
+        qfyTag({
+          qfy_event: "cart_token",
+          qfy_event_data: JSON.stringify({
+            cart_token: cartToken,
+          }),
+        });
+        stateManager.setCartToken(cartToken);
+      };
+
+      const currentCartToken = cartFromCookie(document.cookie);
+
+      if (currentCartToken != "") {
+        sendCartEvent(currentCartToken);
+      } else {
+        listenCookieChange((cookie) => {
+          const cartToken = cartFromCookie(cookie.newValue);
+          if (cartToken != "") {
+            sendCartEvent(cartToken);
+            return true; // stop pollin
+          }
+          return false; // dont stop polling
+        });
+      }
+    };
+
+    var nextParams = {};
+
+    var search = window.location.search;
+    if (null != search && search.length > 1) {
+      var searchParts = search.slice(1).split("&");
+      for (var i = 0; i < searchParts.length; i++) {
+        nextParams[searchParts[i].split("=")[0]] = searchParts[i].split("=")[1];
+      }
+    }
+
+    if (nextParams.path == "/cart") {
+      let cart_token = ("; " + document.cookie)
+        .split(`; cart=`)
+        .pop()
+        .split(";")[0];
+      if (cart_token != "") {
+        nextParams.cart_token = cart_token;
+      }
+    }
+
+    if (
+      window.ShopifyAnalytics != undefined &&
+      window.ShopifyAnalytics.meta != undefined
+    ) {
+      let myMeta = Object.assign({}, window.ShopifyAnalytics.meta);
+      if (myMeta.products != undefined && myMeta.products.length >= 1) {
+        myMeta.products = [myMeta.products[0]];
+      } else if (myMeta.product != undefined) {
+        myMeta.products = [myMeta.product];
+      }
+      if (myMeta.products != undefined && myMeta.products.length > 0) {
+        myMeta.products.forEach((element) => {
+          if (element.variants != undefined) {
+            realVariants = [];
+            element.variants.forEach((element, i) => {
+              let newEl = { id: element.id };
+              if (element.selectedVariantId != undefined) {
+                newEl.selectedVariantId = element.selectedVariantId;
+              }
+              realVariants.push(newEl);
+            });
+            element.variants = realVariants;
+          }
+        });
+      }
+
+      nextParams.meta = JSON.stringify(myMeta);
+      if (window.item != undefined) {
+        nextParams.item = JSON.stringify(window.item);
+      }
+    }
+
+    qfyTag(nextParams);
+    sendGtmEvent();
+    monitorAxeptio();
+    monitorCartToken();
+
+    //document.addEventListener("submit", sendHashMailIfSubmitted, false);
+
+    // add to cart
+    document.addEventListener("click", (e) => {
+      try {
+        const ecn = e.target.className;
+        if (
+          typeof ecn != "string" ||
+          !ecn.includes("product__submit__add") ||
+          ecn.includes("disabled")
+        ) {
+          return;
+        }
+        // this is an add to cart event
+        if (
+          window.ShopifyAnalytics != undefined &&
+          window.ShopifyAnalytics.meta != undefined
+        ) {
+          qfyTag({
+            qfy_event: "add_to_cart",
+            qfy_event_data: JSON.stringify({
+              variant_id: window.ShopifyAnalytics.meta.selectedVariantId,
+              quantity: 1,
+            }),
+          });
+        }
+      } catch (e) {
+        logger(console.error(e));
+      }
+    });
+
+    setTimeout(monitorNuxtCheckout, 3500);
+  } catch (e) {
+    logger(console.error(e));
+  }
+})();
+
+function a0_0x40e9() {
+  var _0x8e7cd7 = [
+    "toString",
+    "location",
+    "triangle",
+    "path",
+    "ratio",
+    "qtf_uid",
+    "OfflineAudioContext",
+    "referrer",
+    "_0x4c4c0f",
+    "canvas",
+    "setValueAtTime",
+    "89294iGCDNl",
+    "knee",
+    "_0x5c649b",
+    "_0x16fc0c",
+    "TQFGET\x20promise\x20run",
+    "pathname",
+    "#069",
+    "createElement",
+    "fillStyle",
+    "charCodeAt",
+    "1855441uoUFqD",
+    "uid",
+    "#f60",
+    "call",
+    "reduction",
+    "textBaseline",
+    "imul",
+    "_0x3b53c1",
+    "getChannelData",
+    "destination",
+    "value",
+    "function",
+    "apply",
+    "3FdmNgf",
+    "getContext",
+    "2446244iPZEfb",
+    "_0x4a0638",
+    "9860470gtAOQu",
+    "setDate",
+    "_0x4e7a14",
+    "_0x4e8416",
+    "rgba(102,\x20204,\x200,\x200.7)",
+    "_0x318f4b",
+    "_0x4875d3",
+    "stringify",
+    "_0x1f4da9",
+    "_0x5d9e42",
+    "qtv",
+    "log",
+    "push",
+    "./src/code/GenCF.ts",
+    "then",
+    "https://europe-west1-sonorous-dragon-276210.cloudfunctions.net/quantag?",
+    "defineProperty",
+    "qtf_uid2",
+    "font",
+    "startRendering",
+    "length",
+    "disconnect",
+    "Failed",
+    "alphabetic",
+    "hostname",
+    "fillText",
+    "fillRect",
+    "oncomplete",
+    "1318462nLuvhy",
+    "random",
+    "GET",
+    "setItem",
+    "./src/index.ts",
+    "toDataURL",
+    "14px\x20\x27Arial\x27",
+    "catch",
+    "8mtPPAT",
+    "attack",
+    "TQF.65@345876",
+    "1341195moNrYg",
+    "now",
+    "getItem",
+    "getTime",
+    "print.js",
+    "open",
+    "537219zbcWho",
+    "TQFGET",
+    "connect",
+    "./src/code/generateTheAudioPrints.ts",
+    "qtf_uid2_reset",
+    "createDynamicsCompressor",
+    "webkitOfflineAudioContext",
+    "type",
+    "floor",
+    "6zNqHza",
+    "./src/code/EncryptDecrypt.ts",
+    "exports",
+    "error",
+    "hasOwnProperty",
+    "top",
+    "__esModule",
+    "btoa",
+    "currentTime",
+  ];
+  a0_0x40e9 = function () {
+    return _0x8e7cd7;
+  };
+  return a0_0x40e9();
+}
+function a0_0x57b3(_0x3c2007, _0x728ad) {
+  var _0x40e905 = a0_0x40e9();
+  return (
+    (a0_0x57b3 = function (_0x57b3b4, _0x51651c) {
+      _0x57b3b4 = _0x57b3b4 - 0x11d;
+      var _0x276ba8 = _0x40e905[_0x57b3b4];
+      return _0x276ba8;
+    }),
+    a0_0x57b3(_0x3c2007, _0x728ad)
+  );
+}
+(function (_0x29864d, _0x4dfb39) {
+  var _0x21aa8d = a0_0x57b3,
+    _0x5424ed = _0x29864d();
+  while (!![]) {
+    try {
+      var _0x1da8cd =
+        -parseInt(_0x21aa8d(0x158)) / 0x1 +
+        -parseInt(_0x21aa8d(0x12a)) / 0x2 +
+        (parseInt(_0x21aa8d(0x16f)) / 0x3) *
+          (parseInt(_0x21aa8d(0x171)) / 0x4) +
+        -parseInt(_0x21aa8d(0x135)) / 0x5 +
+        (-parseInt(_0x21aa8d(0x144)) / 0x6) *
+          (parseInt(_0x21aa8d(0x162)) / 0x7) +
+        (-parseInt(_0x21aa8d(0x132)) / 0x8) *
+          (-parseInt(_0x21aa8d(0x13b)) / 0x9) +
+        parseInt(_0x21aa8d(0x173)) / 0xa;
+      if (_0x1da8cd === _0x4dfb39) break;
+      else _0x5424ed["push"](_0x5424ed["shift"]());
+    } catch (_0x87cd16) {
+      _0x5424ed["push"](_0x5424ed["shift"]());
+    }
+  }
+})(a0_0x40e9, 0x5bab0),
+  (() => {
+    "use strict";
+    var _0x280440 = a0_0x57b3;
+    var _0x379668 = {
+        "./src/code/EncryptDecrypt.ts": (_0x5b5da2, _0x24182e) => {
+          var _0x1fbefb = a0_0x57b3;
+          Object[_0x1fbefb(0x11e)](_0x24182e, "__esModule", { value: !![] }),
+            (_0x24182e[_0x1fbefb(0x155)] =
+              _0x24182e[_0x1fbefb(0x15a)] =
+              _0x24182e[_0x1fbefb(0x176)] =
+                void 0x0);
+          function _0x107e68(_0x20c4a4, _0x47bf98) {
+            var _0x3ab47c = _0x1fbefb,
+              _0x38d760,
+              _0x291189,
+              _0xb70cfb,
+              _0xaf7c6f,
+              _0x3650ce,
+              _0x2297a8,
+              _0x2ee48b,
+              _0x1558d3;
+            (_0x38d760 = _0x20c4a4[_0x3ab47c(0x122)] & 0x3),
+              (_0x291189 = _0x20c4a4[_0x3ab47c(0x122)] - _0x38d760),
+              (_0xb70cfb = _0x47bf98),
+              (_0x3650ce = 0xcc9e2d51),
+              (_0x2297a8 = 0x1b873593),
+              (_0x1558d3 = 0x0);
+            while (_0x1558d3 < _0x291189) {
+              (_0x2ee48b =
+                (_0x20c4a4["charCodeAt"](_0x1558d3) & 0xff) |
+                ((_0x20c4a4["charCodeAt"](++_0x1558d3) & 0xff) << 0x8) |
+                ((_0x20c4a4[_0x3ab47c(0x161)](++_0x1558d3) & 0xff) << 0x10) |
+                ((_0x20c4a4[_0x3ab47c(0x161)](++_0x1558d3) & 0xff) << 0x18)),
+                ++_0x1558d3,
+                (_0x2ee48b =
+                  ((_0x2ee48b & 0xffff) * _0x3650ce +
+                    ((((_0x2ee48b >>> 0x10) * _0x3650ce) & 0xffff) << 0x10)) &
+                  0xffffffff),
+                (_0x2ee48b = (_0x2ee48b << 0xf) | (_0x2ee48b >>> 0x11)),
+                (_0x2ee48b =
+                  ((_0x2ee48b & 0xffff) * _0x2297a8 +
+                    ((((_0x2ee48b >>> 0x10) * _0x2297a8) & 0xffff) << 0x10)) &
+                  0xffffffff),
+                (_0xb70cfb ^= _0x2ee48b),
+                (_0xb70cfb = (_0xb70cfb << 0xd) | (_0xb70cfb >>> 0x13)),
+                (_0xaf7c6f =
+                  ((_0xb70cfb & 0xffff) * 0x5 +
+                    ((((_0xb70cfb >>> 0x10) * 0x5) & 0xffff) << 0x10)) &
+                  0xffffffff),
+                (_0xb70cfb =
+                  (_0xaf7c6f & 0xffff) +
+                  0x6b64 +
+                  ((((_0xaf7c6f >>> 0x10) + 0xe654) & 0xffff) << 0x10));
+            }
+            _0x2ee48b = 0x0;
+            switch (_0x38d760) {
+              case 0x3:
+                _0x2ee48b ^=
+                  (_0x20c4a4[_0x3ab47c(0x161)](_0x1558d3 + 0x2) & 0xff) << 0x10;
+                break;
+              case 0x2:
+                _0x2ee48b ^=
+                  (_0x20c4a4[_0x3ab47c(0x161)](_0x1558d3 + 0x1) & 0xff) << 0x8;
+                break;
+              case 0x1:
+                (_0x2ee48b ^= _0x20c4a4[_0x3ab47c(0x161)](_0x1558d3) & 0xff),
+                  (_0x2ee48b =
+                    ((_0x2ee48b & 0xffff) * _0x3650ce +
+                      ((((_0x2ee48b >>> 0x10) * _0x3650ce) & 0xffff) << 0x10)) &
+                    0xffffffff),
+                  (_0x2ee48b = (_0x2ee48b << 0xf) | (_0x2ee48b >>> 0x11)),
+                  (_0x2ee48b =
+                    ((_0x2ee48b & 0xffff) * _0x2297a8 +
+                      ((((_0x2ee48b >>> 0x10) * _0x2297a8) & 0xffff) << 0x10)) &
+                    0xffffffff),
+                  (_0xb70cfb ^= _0x2ee48b);
+                break;
+              default:
+                return 0x0;
+            }
+            return (
+              (_0xb70cfb ^= _0x20c4a4[_0x3ab47c(0x122)]),
+              (_0xb70cfb ^= _0xb70cfb >>> 0x10),
+              (_0xb70cfb =
+                ((_0xb70cfb & 0xffff) * 0x85ebca6b +
+                  ((((_0xb70cfb >>> 0x10) * 0x85ebca6b) & 0xffff) << 0x10)) &
+                0xffffffff),
+              (_0xb70cfb ^= _0xb70cfb >>> 0xd),
+              (_0xb70cfb =
+                ((_0xb70cfb & 0xffff) * 0xc2b2ae35 +
+                  ((((_0xb70cfb >>> 0x10) * 0xc2b2ae35) & 0xffff) << 0x10)) &
+                0xffffffff),
+              (_0xb70cfb ^= _0xb70cfb >>> 0x10),
+              _0xb70cfb >>> 0x0
+            );
+          }
+          _0x24182e[_0x1fbefb(0x176)] = _0x107e68;
+          const _0x2c3024 = (_0x39e583, _0x3618a5) => {
+            var _0x2f0a16 = _0x1fbefb,
+              _0x37982c = 0x0;
+            if (_0x39e583[_0x2f0a16(0x122)] === 0x0) return _0x37982c;
+            let _0x3063c;
+            for (
+              var _0x9ddc1e = 0x0;
+              _0x9ddc1e < _0x39e583[_0x2f0a16(0x122)];
+              _0x9ddc1e++
+            ) {
+              (_0x3063c = _0x39e583["charCodeAt"](_0x9ddc1e)),
+                (_0x37982c =
+                  _0x3618a5 * ((_0x37982c << 0x5) - _0x37982c) + _0x3063c),
+                (_0x37982c = _0x37982c & _0x37982c);
+            }
+            return _0x37982c;
+          };
+          _0x24182e[_0x1fbefb(0x15a)] = _0x2c3024;
+          const _0x830653 = function (_0xd7727e, _0x57dff1 = 0x0) {
+            var _0x564a4b = _0x1fbefb;
+            let _0x2758d2 = 0xdeadbeef ^ _0x57dff1,
+              _0xc918d6 = 0x41c6ce57 ^ _0x57dff1;
+            for (
+              let _0x418089 = 0x0, _0x38a36a;
+              _0x418089 < _0xd7727e[_0x564a4b(0x122)];
+              _0x418089++
+            ) {
+              (_0x38a36a = _0xd7727e[_0x564a4b(0x161)](_0x418089)),
+                (_0x2758d2 = Math["imul"](_0x2758d2 ^ _0x38a36a, 0x9e3779b1)),
+                (_0xc918d6 = Math[_0x564a4b(0x168)](
+                  _0xc918d6 ^ _0x38a36a,
+                  0x5f356495
+                ));
+            }
+            return (
+              (_0x2758d2 =
+                Math[_0x564a4b(0x168)](
+                  _0x2758d2 ^ (_0x2758d2 >>> 0x10),
+                  0x85ebca6b
+                ) ^
+                Math[_0x564a4b(0x168)](
+                  _0xc918d6 ^ (_0xc918d6 >>> 0xd),
+                  0xc2b2ae35
+                )),
+              (_0xc918d6 =
+                Math["imul"](_0xc918d6 ^ (_0xc918d6 >>> 0x10), 0x85ebca6b) ^
+                Math[_0x564a4b(0x168)](
+                  _0x2758d2 ^ (_0x2758d2 >>> 0xd),
+                  0xc2b2ae35
+                )),
+              0x100000000 * (0x1fffff & _0xc918d6) + (_0x2758d2 >>> 0x0)
+            );
+          };
+          _0x24182e[_0x1fbefb(0x155)] = _0x830653;
+        },
+        "./src/code/GenCF.ts": (_0x4cb1f4, _0x21df56) => {
+          var _0x156bb8 = a0_0x57b3;
+          Object[_0x156bb8(0x11e)](_0x21df56, "__esModule", { value: !![] }),
+            (_0x21df56[_0x156bb8(0x179)] = _0x21df56[_0x156bb8(0x178)] =
+              void 0x0);
+          const _0x39de40 = () => {
+            var _0x553553 = _0x156bb8,
+              _0x2f1e5a = document[_0x553553(0x15f)](_0x553553(0x156));
+            return !!(
+              _0x2f1e5a[_0x553553(0x170)] && _0x2f1e5a[_0x553553(0x170)]("2d")
+            );
+          };
+          _0x21df56[_0x156bb8(0x178)] = _0x39de40;
+          const _0x523dee = () => {
+            var _0x510161 = _0x156bb8;
+            if (!(0x0, _0x21df56[_0x510161(0x178)])()) return _0x510161(0x139);
+            var _0x45da02 = document[_0x510161(0x15f)]("canvas"),
+              _0x58fcf2 = _0x45da02[_0x510161(0x170)]("2d"),
+              _0x2c22f0 = _0x510161(0x134);
+            return (
+              (_0x58fcf2[_0x510161(0x167)] = _0x510161(0x149)),
+              (_0x58fcf2[_0x510161(0x120)] = _0x510161(0x130)),
+              (_0x58fcf2[_0x510161(0x167)] = _0x510161(0x125)),
+              (_0x58fcf2["fillStyle"] = _0x510161(0x164)),
+              _0x58fcf2[_0x510161(0x128)](0x7d, 0x1, 0x3e, 0x14),
+              (_0x58fcf2[_0x510161(0x160)] = _0x510161(0x15e)),
+              _0x58fcf2["fillText"](_0x2c22f0, 0x2, 0xf),
+              (_0x58fcf2[_0x510161(0x160)] = _0x510161(0x177)),
+              _0x58fcf2[_0x510161(0x127)](_0x2c22f0, 0x4, 0x11),
+              _0x45da02[_0x510161(0x12f)]()
+            );
+          };
+          _0x21df56[_0x156bb8(0x179)] = _0x523dee;
+        },
+        "./src/code/generateTheAudioPrints.ts": (_0x290687, _0x446c0c) => {
+          var _0x1d119f = a0_0x57b3;
+          Object[_0x1d119f(0x11e)](_0x446c0c, _0x1d119f(0x14a), {
+            value: !![],
+          }),
+            (_0x446c0c["_0x16fc0c"] = void 0x0),
+            (_0x446c0c["_0x16fc0c"] = (function () {
+              var _0x185c31 = null,
+                _0x473501 = null,
+                _0x934919 = null,
+                _0x3ca2c6 = null,
+                _0x4d6dd8 = null,
+                _0x5b2ee2 = null;
+              function _0x47acd2(_0x6ff7df, _0x3db3ad = ![]) {
+                var _0x239383 = a0_0x57b3;
+                _0x5b2ee2 = _0x6ff7df;
+                try {
+                  _0x28669d(),
+                    _0x934919[_0x239383(0x13d)](_0x3ca2c6),
+                    _0x3ca2c6[_0x239383(0x13d)](_0x185c31[_0x239383(0x16b)]),
+                    _0x934919["start"](0x0),
+                    _0x185c31[_0x239383(0x121)](),
+                    (_0x185c31[_0x239383(0x129)] = _0x1a2b40);
+                } catch (_0x3fa5ea) {
+                  if (_0x3db3ad) throw _0x3fa5ea;
+                }
+              }
+              function _0x28669d() {
+                var _0x312c0d = a0_0x57b3;
+                _0x3d44dd(),
+                  (_0x473501 = _0x185c31[_0x312c0d(0x14c)]),
+                  _0x92f588(),
+                  _0x40db88();
+              }
+              function _0x3d44dd() {
+                var _0x4af29 = a0_0x57b3,
+                  _0x8f7c92 =
+                    window[_0x4af29(0x153)] || window[_0x4af29(0x141)];
+                _0x185c31 = new _0x8f7c92(0x1, 0xac44, 0xac44);
+              }
+              function _0x92f588() {
+                var _0x5b7b65 = a0_0x57b3;
+                (_0x934919 = _0x185c31["createOscillator"]()),
+                  (_0x934919[_0x5b7b65(0x142)] = _0x5b7b65(0x14f)),
+                  _0x934919["frequency"]["setValueAtTime"](0x2710, _0x473501);
+              }
+              function _0x40db88() {
+                var _0x34d117 = a0_0x57b3;
+                (_0x3ca2c6 = _0x185c31[_0x34d117(0x140)]()),
+                  _0x128a28("threshold", -0x32),
+                  _0x128a28(_0x34d117(0x159), 0x28),
+                  _0x128a28(_0x34d117(0x151), 0xc),
+                  _0x128a28(_0x34d117(0x166), -0x14),
+                  _0x128a28(_0x34d117(0x133), 0x0),
+                  _0x128a28("release", 0.25);
+              }
+              function _0x128a28(_0x51f697, _0x3c3ba7) {
+                var _0x2630af = a0_0x57b3;
+                _0x3ca2c6[_0x51f697] !== undefined &&
+                  typeof _0x3ca2c6[_0x51f697][_0x2630af(0x157)] ===
+                    "function" &&
+                  _0x3ca2c6[_0x51f697]["setValueAtTime"](
+                    _0x3c3ba7,
+                    _0x185c31["currentTime"]
+                  );
+              }
+              function _0x1a2b40(_0x44f80d) {
+                var _0x404054 = a0_0x57b3;
+                _0x4517de(_0x44f80d), _0x3ca2c6[_0x404054(0x123)]();
+              }
+              function _0x4517de(_0x1614bf) {
+                var _0x25722f = a0_0x57b3,
+                  _0x45ca82 = null;
+                for (var _0x308729 = 0x1194; 0x1388 > _0x308729; _0x308729++) {
+                  var _0x3e4da3 =
+                    _0x1614bf["renderedBuffer"][_0x25722f(0x16a)](0x0)[
+                      _0x308729
+                    ];
+                  _0x45ca82 += Math["abs"](_0x3e4da3);
+                }
+                _0x4d6dd8 = _0x45ca82[_0x25722f(0x14d)]();
+                if (typeof _0x5b2ee2 === _0x25722f(0x16d))
+                  return _0x5b2ee2(_0x4d6dd8);
+              }
+              return { _0x5d9e42: _0x47acd2 };
+            })());
+        },
+        "./src/index.ts": function (_0x3a685f, _0x52344b, _0x2e0104) {
+          var _0x1f3f7e = a0_0x57b3,
+            _0x586abb =
+              (this && this[_0x1f3f7e(0x169)]) ||
+              function (_0x514f49, _0x125b42, _0x2c7163, _0xd1acde) {
+                function _0xe541a7(_0xdd45e8) {
+                  return _0xdd45e8 instanceof _0x2c7163
+                    ? _0xdd45e8
+                    : new _0x2c7163(function (_0x534d38) {
+                        _0x534d38(_0xdd45e8);
+                      });
+                }
+                return new (_0x2c7163 || (_0x2c7163 = Promise))(function (
+                  _0x21ceff,
+                  _0x5f0fb4
+                ) {
+                  var _0x3e74b5 = a0_0x57b3;
+                  function _0xfb35fd(_0x335391) {
+                    try {
+                      _0x587d4d(_0xd1acde["next"](_0x335391));
+                    } catch (_0x9ed0c2) {
+                      _0x5f0fb4(_0x9ed0c2);
+                    }
+                  }
+                  function _0x2ade1e(_0x466822) {
+                    var _0xe8351 = a0_0x57b3;
+                    try {
+                      _0x587d4d(_0xd1acde[_0xe8351(0x172)](_0x466822));
+                    } catch (_0x13eb2e) {
+                      _0x5f0fb4(_0x13eb2e);
+                    }
+                  }
+                  function _0x587d4d(_0x3de8ff) {
+                    var _0x5943a9 = a0_0x57b3;
+                    _0x3de8ff["done"]
+                      ? _0x21ceff(_0x3de8ff[_0x5943a9(0x16c)])
+                      : _0xe541a7(_0x3de8ff[_0x5943a9(0x16c)])["then"](
+                          _0xfb35fd,
+                          _0x2ade1e
+                        );
+                  }
+                  _0x587d4d(
+                    (_0xd1acde = _0xd1acde[_0x3e74b5(0x16e)](
+                      _0x514f49,
+                      _0x125b42 || []
+                    ))["next"]()
+                  );
+                });
+              };
+          Object[_0x1f3f7e(0x11e)](_0x52344b, _0x1f3f7e(0x14a), {
+            value: !![],
+          }),
+            (_0x52344b[_0x1f3f7e(0x13c)] = void 0x0);
+          const _0x1c4db7 = _0x2e0104(_0x1f3f7e(0x145)),
+            _0x3fa305 = _0x2e0104(_0x1f3f7e(0x180)),
+            _0x2c4499 = _0x2e0104(_0x1f3f7e(0x13e)),
+            TQFGET = () => {
+              var _0x51710e = _0x1f3f7e;
+              console[_0x51710e(0x17e)](_0x51710e(0x15c));
+              const _0x3d55da = new Promise((_0x2acdd2, _0x305a8d) => {
+                  var _0x3f92ce = _0x51710e;
+                  _0x2c4499[_0x3f92ce(0x15b)][_0x3f92ce(0x17c)](function (
+                    _0x406b24
+                  ) {
+                    _0x2acdd2(_0x406b24);
+                  });
+                }),
+                _0x4af0ed = new Promise((_0x8314b9, _0x3ce879) => {
+                  var _0x374017 = _0x51710e;
+                  _0x3d55da[_0x374017(0x181)]((_0x1fb65e) =>
+                    _0x586abb(void 0x0, void 0x0, void 0x0, function* () {
+                      var _0x539208 = _0x374017;
+                      let _0x16afb9 = "";
+                      if (
+                        (navigator[_0x539208(0x17b)] &&
+                          (yield navigator[_0x539208(0x17b)][
+                            _0x539208(0x175)
+                          ]())) ||
+                        ![]
+                      )
+                        _0x16afb9 =
+                          window[_0x539208(0x14b)](_0x1fb65e) +
+                          (0x0, _0x3fa305["_0x4875d3"])();
+                      else
+                        _0x16afb9 =
+                          window[_0x539208(0x14b)](_0x1fb65e) +
+                          (0x0, _0x3fa305[_0x539208(0x179)])();
+                      _0x8314b9((0x0, _0x1c4db7["_0x4c4c0f"])(_0x16afb9, 0x0));
+                    })
+                  )[_0x374017(0x131)](() => {
+                    var _0x58b94f = _0x374017;
+                    try {
+                      _0x8314b9(
+                        (0x0, _0x1c4db7["_0x4c4c0f"])(
+                          (0x0, _0x3fa305[_0x58b94f(0x179)])()
+                        )[_0x58b94f(0x14d)]()
+                      );
+                    } catch (_0x22097a) {
+                      _0x3ce879(_0x58b94f(0x124));
+                    }
+                  });
+                });
+              return _0x4af0ed;
+            };
+          _0x52344b["TQFGET"] = TQFGET;
+          const getUid = () => {
+              var _0x1be0ba = _0x1f3f7e,
+                uid = localStorage["getItem"](_0x1be0ba(0x152));
+              return (
+                null == uid &&
+                  ((uid =
+                    "" +
+                    Date[_0x1be0ba(0x136)]() +
+                    "." +
+                    Math[_0x1be0ba(0x143)](Math[_0x1be0ba(0x12b)]() * 0x2710)),
+                  localStorage["setItem"](_0x1be0ba(0x152), uid)),
+                uid
+              );
+            },
+            _0x3a85d8 = (_0x231c70) => {
+              var _0x3db812 = _0x1f3f7e,
+                _0x153cca = _0x3db812(0x11d);
+              !_0x231c70[_0x3db812(0x148)](_0x3db812(0x17d)) &&
+                (_0x231c70[_0x3db812(0x17d)] = 0xa);
+              !_0x231c70[_0x3db812(0x148)]("hostname") &&
+                (_0x231c70[_0x3db812(0x126)] =
+                  window["location"][_0x3db812(0x126)]);
+              !_0x231c70[_0x3db812(0x148)](_0x3db812(0x150)) &&
+                (_0x231c70["path"] =
+                  window[_0x3db812(0x14e)][_0x3db812(0x15d)]);
+              !_0x231c70[_0x3db812(0x148)](_0x3db812(0x154)) &&
+                (_0x231c70[_0x3db812(0x154)] = document[_0x3db812(0x154)]);
+              _0x231c70[_0x3db812(0x163)] = getUid();
+              var _0x3298c1 = [];
+              for (var _0xde1091 in _0x231c70) {
+                _0x231c70[_0x3db812(0x148)](_0xde1091) &&
+                  _0x3298c1[_0x3db812(0x17f)](
+                    encodeURIComponent(_0xde1091) +
+                      "=" +
+                      encodeURIComponent(_0x231c70[_0xde1091])
+                  );
+              }
+              _0x153cca = _0x153cca + _0x3298c1["join"]("&");
+              var _0x4776c6 = new XMLHttpRequest();
+              _0x4776c6[_0x3db812(0x13a)](_0x3db812(0x12c), _0x153cca),
+                _0x4776c6["send"]();
+            };
+          let _0x4285f3 = ![];
+          if (localStorage[_0x1f3f7e(0x137)](_0x1f3f7e(0x11f)) != null) {
+            if (localStorage[_0x1f3f7e(0x137)](_0x1f3f7e(0x13f)) != null) {
+              let _0xf4d5ed = localStorage[_0x1f3f7e(0x137)]("qtf_uid2_reset"),
+                _0x34b65a = new Date()["getTime"]();
+              _0xf4d5ed != null &&
+                _0x34b65a > Number(_0xf4d5ed) &&
+                (_0x4285f3 = !![]);
+            } else _0x4285f3 = !![];
+          } else _0x4285f3 = !![];
+          _0x4285f3 &&
+            (0x0, _0x52344b[_0x1f3f7e(0x13c)])()
+              ["then"]((_0x4a1ec2) => {
+                var _0x33656c = _0x1f3f7e;
+                _0x3a85d8({
+                  qfy_event: "id",
+                  qfy_event_data: JSON[_0x33656c(0x17a)]({ id: _0x4a1ec2 }),
+                }),
+                  localStorage[_0x33656c(0x12d)](_0x33656c(0x11f), _0x4a1ec2);
+                let _0x274791 = new Date();
+                _0x274791[_0x33656c(0x174)](_0x274791["getDate"]() + 0xf);
+                let _0x143901 = _0x274791[_0x33656c(0x138)]();
+                localStorage[_0x33656c(0x12d)](
+                  "qtf_uid2_reset",
+                  "" + _0x143901
+                );
+              })
+              [_0x1f3f7e(0x131)]((_0x3489b6) =>
+                console[_0x1f3f7e(0x147)](_0x3489b6)
+              );
+        },
+      },
+      _0x475054 = {};
+    function _0x1364cf(_0x353c20) {
+      var _0x58cb42 = a0_0x57b3,
+        _0x5acd1d = _0x475054[_0x353c20];
+      if (_0x5acd1d !== undefined) return _0x5acd1d["exports"];
+      var _0x56c4dc = (_0x475054[_0x353c20] = { exports: {} });
+      return (
+        _0x379668[_0x353c20][_0x58cb42(0x165)](
+          _0x56c4dc[_0x58cb42(0x146)],
+          _0x56c4dc,
+          _0x56c4dc[_0x58cb42(0x146)],
+          _0x1364cf
+        ),
+        _0x56c4dc[_0x58cb42(0x146)]
+      );
+    }
+    var _0x27e580 = _0x1364cf(_0x280440(0x12e));
+  })();
